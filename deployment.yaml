@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: actsctrl
+  labels:
+    app: actsctrl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: actsctrl
+  template:
+    metadata:
+      labels:
+        app: actsctrl
+    spec:
+      containers:
+        - name: actsctrl
+          image: registry.gitlab.com/ironcore864/actsctrl:master
+          env:
+          - name: Port
+            value: "8080"
+          ports:
+            - containerPort: 8080
+      imagePullSecrets:
+      - name: regcred

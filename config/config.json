@@ -1,0 +1,8 @@
+{
+    "Port": 8080,
+    "ReqPerSec": 1,
+    "ReqPerMin": 10,
+    "ReqPerHour": 360,
+    "RedisHost": "127.0.0.1",
+    "RedisPort": 6379
+}

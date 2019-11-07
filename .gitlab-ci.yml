@@ -1,0 +1,86 @@
+variables:
+  REPO_NAME: gitlab.com/ironcore864/actsctrl
+
+stages:
+  - test
+  - build
+  - deploy
+
+format-and-test:
+  stage: test
+  # The problem is that to be able to use go get, one needs to put
+  # the repository in the $GOPATH. So for example if your gitlab domain
+  # is gitlab.com, and that your repository is namespace/project, and
+  # the default GOPATH being /go, then you'd need to have your
+  # repository in /go/src/gitlab.com/namespace/project
+  # Thus, making a symbolic link corrects this.
+  image: golang:latest
+  before_script:
+    - mkdir -p $GOPATH/src/$(dirname $REPO_NAME)
+    - ln -svf $CI_PROJECT_DIR $GOPATH/src/$REPO_NAME
+    - cd $GOPATH/src/$REPO_NAME
+    - go get
+  script:
+    - go fmt $(go list ./... | grep -v /vendor/)
+    - go vet $(go list ./... | grep -v /vendor/)
+    - go test -race $(go list ./... | grep -v /vendor/)
+
+build-docker-image:
+  stage: build
+  image: docker:stable
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_DRIVER: overlay2
+    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN registry.gitlab.com
+    - docker build -t $IMAGE_TAG .
+    - docker push $IMAGE_TAG
+
+deploy:
+  stage: deploy
+  image: docker:stable-git
+  variables:
+    KUBERNETES_VERSION: 1.13.4
+  services:
+    - docker:stable-dind
+  script:
+    - prepare_deploy
+    - deploy
+  environment:
+    name: production
+  only:
+    refs:
+      - master
+
+.auto_devops: &auto_devops |
+  # Auto DevOps variables and functions
+  [[ "$TRACE" ]] && set -x
+
+  function prepare_deploy() {
+
+    echo "Installing dependencies..."
+
+    apk add -U openssh openssl curl tar gzip bash ca-certificates git
+    curl -L -o /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub
+    curl -L -O https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.28-r0/glibc-2.28-r0.apk
+    apk add glibc-2.28-r0.apk
+    rm glibc-2.28-r0.apk
+
+    curl -L -o /usr/bin/kubectl "https://storage.googleapis.com/kubernetes-release/release/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl"
+    chmod +x /usr/bin/kubectl
+    kubectl version --client
+
+    echo "Checking kubernetes namespace..."
+
+    kubectl describe namespace "$KUBE_NAMESPACE" || kubectl create namespace "$KUBE_NAMESPACE"
+  }
+
+  function deploy() {
+    kubectl apply -f deployment.yaml
+  }
+
+before_script:
+- *auto_devops
